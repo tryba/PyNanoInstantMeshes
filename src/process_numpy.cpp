@@ -213,29 +213,50 @@ remesh(
 
     optimizer.shutdown();
 
-    MatrixXf O_extr, N_extr, Nf_extr;
+    MatrixXf * O_extr = new MatrixXf();
+    MatrixXf N_extr, Nf_extr;
     std::vector<std::vector<TaggedLink>> adj_extr;
-    extract_graph(mRes, extrinsic, rosy, posy, adj_extr, O_extr, N_extr,
+    extract_graph(mRes, extrinsic, rosy, posy, adj_extr, *O_extr, N_extr,
                   crease_in, crease_out, deterministic);
 
-    MatrixXu F_extr;
-    extract_faces(adj_extr, O_extr, N_extr, Nf_extr, F_extr, posy,
+    MatrixXu * F_extr = new MatrixXu();
+    extract_faces(adj_extr, *O_extr, N_extr, Nf_extr, *F_extr, posy,
                   mRes.scale(), crease_out, true, posy == 4, bvh, smooth_iter);
     cout << "Extraction is done. (total time: " << timeString(timer.reset()) << ")" << endl;
 
-    cout << "Faces " << F_extr.cols() << ", " << F_extr.rows() << endl;
-    cout << "Verts " << O_extr.cols() << ", " << O_extr.rows() << endl;
+
+
+    cout << "Faces " << F_extr->cols() << ", " << F_extr->rows() << endl;
+    cout << "Verts " << O_extr->cols() << ", " << O_extr->rows() << endl;
     // Create new numpy arrays which house the F and V matrices
-    const uint32_t num_verts = O_extr.cols();
-    const uint32_t num_faces = F_extr.cols();
-    const uint32_t face_dim = F_extr.rows();
+    const uint32_t num_verts = O_extr->cols();
+    const uint32_t num_faces = F_extr->cols();
+    const uint32_t face_dim = F_extr->rows();
 
     size_t shapea[2] = {num_verts, 3};
     size_t shapeb[2] = {num_faces, face_dim};
-    return std::make_tuple(nb::ndarray<nb::numpy, const Float, nb::ndim<2>>(
-                               O_extr.transpose().data(), 2, shapea, nb::handle()),
-                           nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
-                               F_extr.transpose().data(), 2, shapeb, nb::handle()));
+
+    nb::capsule face_owner(F_extr, [](void *p) noexcept {
+        delete p;
+    });
+    nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>> out_faces = nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
+        F_extr->transpose().data(),
+        2,
+        shapeb,
+        face_owner
+    );
+
+    nb::capsule vert_owner(O_extr, [](void *p) noexcept {
+        delete p;
+    });
+    nb::ndarray<nb::numpy, const Float, nb::ndim<2>> out_verts = nb::ndarray<nb::numpy, const Float, nb::ndim<2>>(
+        O_extr->transpose().data(),
+        2,
+        shapea,
+        vert_owner
+    );
+
+    return std::make_tuple(out_verts, out_faces);
 }
 
 NB_MODULE(_pynim, m)
@@ -245,5 +266,5 @@ NB_MODULE(_pynim, m)
           "face_count"_a = -1, "creaseAngle"_a = 0.0,
           "align_to_boundaries"_a = false, "extrinsic"_a=true,
           "smooth_iter"_a = 0, "knn_points"_a = 1000, "deterministic"_a = false,
-          "Remeshes the input mesh and returns the new mesh as a tuple of vertices and faces.");
+          "Remeshes the input mesh and returns the new mesh as a tuple of vertices and faces." );
 }
